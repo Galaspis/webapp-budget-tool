@@ -1,0 +1,402 @@
+import { useState, useEffect } from 'react';
+import { useLanguage } from '../contexts/LanguageContext';
+import apiClient from '../api/apiClient';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
+
+const CategoryReport = () => {
+  const { getText, language } = useLanguage();
+  const [loading, setLoading] = useState(true);
+  const [categoryData, setCategoryData] = useState([]);
+  const [billingPeriods, setBillingPeriods] = useState([]);
+  const [selectedPeriod, setSelectedPeriod] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState(null);
+  const [error, setError] = useState(null);
+
+// Add this filtering function here
+const filterExcludedCategories = (data) => {
+  return data.filter(item => 
+    item.category !== 'לא מסווג' && 
+    item.category !== 'לא לתזרים'
+  );
+};
+  
+  // Report types
+  const [reportType, setReportType] = useState('by_period');
+
+  // Set document direction based on language
+  useEffect(() => {
+    document.documentElement.dir = language === 'he' ? 'rtl' : 'ltr';
+  }, [language]);
+
+  // Fetch billing periods
+  useEffect(() => {
+    const fetchPeriods = async () => {
+      try {
+        const periods = await apiClient.getBillingPeriods();
+        setBillingPeriods(periods);
+        
+        // Set most recent period as default
+        if (periods.length > 0) {
+          setSelectedPeriod(periods[0]);
+        }
+      } catch (err) {
+        console.error('Error fetching billing periods:', err);
+        setError(err.message);
+      }
+    };
+    
+    fetchPeriods();
+  }, []);
+
+  // Fetch category data when selected period changes
+  useEffect(() => {
+    const fetchCategoryData = async () => {
+      if (!selectedPeriod) return;
+      
+      try {
+        setLoading(true);
+        const data = await apiClient.getCategoryReport(selectedPeriod);
+        
+        // Apply direct filtering to exclude unwanted categories
+        const filteredData = data.filter(category => 
+          category.category !== 'לא מסווג' && 
+          category.category !== 'לא לתזרים'
+        );
+        
+        setCategoryData(filterExcludedCategories(data)); // Apply the filter
+        setSelectedCategory(null); // Reset selected category
+        setLoading(false);
+      } catch (err) {
+        console.error('Error fetching category data:', err);
+        setError(err.message);
+        setLoading(false);
+      }
+    };
+    
+    fetchCategoryData();
+  }, [selectedPeriod]);
+
+  // Format data for pie chart - with explicit filtering
+  const formatPieData = (categoryData) => {
+    // Define categories to exclude
+    const EXCLUDED_CATEGORIES = ['לא מסווג', 'לא לתזרים'];
+    
+    // First filter out excluded categories
+    const filteredCategories = categoryData.filter(item => 
+      !EXCLUDED_CATEGORIES.includes(item.category)
+    );
+    
+    // Then filter out any categories with zero or undefined total
+    const validCategories = filteredCategories.filter(item => 
+      item.total && item.total > 0
+    );
+    
+    // Map to the format needed for the pie chart
+    return validCategories.map(item => ({
+      name: item.category,
+      value: item.total
+    }));
+  };
+
+  // Format data for pie chart
+  const pieData = formatPieData(categoryData);
+
+  
+  // Update the getSubCategoryData function to add better handling and logging
+  const getSubCategoryData = () => {
+    if (!selectedCategory) return [];
+    
+    const categoryInfo = categoryData.find(item => item.category === selectedCategory);
+    if (!categoryInfo) return [];
+    
+    // Handle different possible data structures for subcategories
+    if (!categoryInfo.subcategories) return [];
+    
+    // Ensure we're working with an array of objects having name and amount properties
+    return categoryInfo.subcategories
+      .filter(sub => sub && sub.name && sub.name !== 'לא מסווג') // Filter out excluded subcategories and ensure valid entries
+      .map(sub => ({
+        name: sub.name || 'Unknown',
+        value: typeof sub.amount === 'number' ? sub.amount : 0
+      }));
+  };
+
+  // Colors for pie charts
+  const COLORS = [
+    '#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', 
+    '#82ca9d', '#ffc658', '#8dd1e1', '#a4de6c', '#d0ed57',
+    '#bc5090', '#ff6361', '#ffa600', '#003f5c', '#665191'
+  ];
+
+  // Loading state
+  if (loading && categoryData.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="text-center">
+          <svg className="animate-spin h-10 w-10 text-indigo-600 mx-auto mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          </svg>
+          <p className="text-indigo-700 font-semibold">{getText('loading')}</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-6">
+      <header className="mb-8">
+        <h1 className="text-3xl font-bold text-gray-800">{getText('category_report')}</h1>
+      </header>
+
+      {/* Report Type Selection */}
+      <div className="bg-white p-6 rounded-lg shadow mb-6">
+        <h2 className="text-lg font-semibold mb-4">Report Type</h2>
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => setReportType('by_period')}
+            className={`px-4 py-2 rounded-md ${
+              reportType === 'by_period'
+                ? 'bg-indigo-600 text-white'
+                : 'bg-gray-200 text-gray-800 hover:bg-gray-300'
+            }`}
+          >
+            By Billing Period
+          </button>
+          <button
+            onClick={() => setReportType('trend_analysis')}
+            className={`px-4 py-2 rounded-md ${
+              reportType === 'trend_analysis'
+                ? 'bg-indigo-600 text-white'
+                : 'bg-gray-200 text-gray-800 hover:bg-gray-300'
+            }`}
+          >
+            Category Trend Analysis
+          </button>
+        </div>
+      </div>
+
+      {reportType === 'by_period' && (
+        <>
+          {/* Period Selection */}
+          <div className="bg-white p-6 rounded-lg shadow mb-6">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-lg font-semibold">{getText('select_period')}</h2>
+              <div className="text-sm text-gray-500 italic">
+                Note: Transactions marked as "לא מסווג" or "לא לתזרים" are excluded from reports.
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {billingPeriods.map(period => (
+                <button
+                  key={period}
+                  onClick={() => setSelectedPeriod(period)}
+                  className={`px-4 py-2 rounded-md ${
+                    selectedPeriod === period
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-gray-200 text-gray-800 hover:bg-gray-300'
+                  }`}
+                >
+                  {period}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {selectedPeriod && categoryData.length === 0 ? (
+            <div className="bg-white p-6 rounded-lg shadow text-center">
+              <p className="text-gray-500">{getText('no_data')}</p>
+              <p className="text-gray-500 mt-2">No categorized expense data available for the selected period.</p>
+              <p className="text-gray-500 mt-2 text-sm">Note: Transactions marked as "לא מסווג" or "לא לתזרים" are excluded from reports.</p>
+            </div>
+          ) : (
+            <>
+              {/* Main Categories Overview */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+                {/* Pie Chart */}
+                <div className="bg-white p-6 rounded-lg shadow">
+                  <h2 className="text-lg font-semibold mb-4">Expenses by Category</h2>
+                  <div className="h-80">
+                    {pieData.length > 0 ? (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie
+                            data={pieData}
+                            cx="50%"
+                            cy="50%"
+                            labelLine={true}
+                            label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                            outerRadius={80}
+                            fill="#8884d8"
+                            dataKey="value"
+                            onClick={(data) => setSelectedCategory(data.name)}
+                          >
+                            {pieData.map((entry, index) => (
+                              <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                            ))}
+                          </Pie>
+                          <Tooltip formatter={(value) => `${value.toLocaleString()} ₪`} />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <div className="flex items-center justify-center h-full">
+                        <p className="text-gray-500">No category data available to display</p>
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-sm text-center text-gray-500 mt-2">Click on a category to see subcategories</p>
+                </div>
+
+                {/* Category Table */}
+                <div className="bg-white p-6 rounded-lg shadow">
+                  <h2 className="text-lg font-semibold mb-4">Category Summary</h2>
+                  <div className="overflow-auto max-h-80">
+                    <table className="min-w-full">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-4 py-2 text-left text-sm font-medium text-gray-500">
+                            {getText('category')}
+                          </th>
+                          <th className="px-4 py-2 text-right text-sm font-medium text-gray-500">
+                            {getText('amount')}
+                          </th>
+                          <th className="px-4 py-2 text-right text-sm font-medium text-gray-500">
+                            %
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-200">
+                        {categoryData
+                          .filter(category => 
+                            category.category !== 'לא מסווג' && 
+                            category.category !== 'לא לתזרים'
+                          )
+                          .map((category) => {
+                            const totalExpenses = categoryData
+                              .filter(cat => 
+                                cat.category !== 'לא מסווג' && 
+                                cat.category !== 'לא לתזרים'
+                              )
+                              .reduce((sum, cat) => sum + cat.total, 0);
+                              
+                            const percentage = totalExpenses > 0 ? (category.total / totalExpenses * 100).toFixed(1) : 0;
+                            
+                            return (
+                              <tr 
+                                key={category.category} 
+                                className={`hover:bg-gray-50 cursor-pointer ${selectedCategory === category.category ? 'bg-indigo-50' : ''}`}
+                                onClick={() => setSelectedCategory(category.category)}
+                              >
+                                <td className="px-4 py-2 text-sm text-gray-900">{category.category}</td>
+                                <td className="px-4 py-2 text-sm text-right text-gray-900">
+                                  {category.total.toLocaleString(undefined, { maximumFractionDigits: 0 })} ₪
+                                </td>
+                                <td className="px-4 py-2 text-sm text-right text-gray-900">
+                                  {percentage}%
+                                </td>
+                              </tr>
+                            );
+                          })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+
+              {/* Subcategory Breakdown (if category is selected) */}
+              {selectedCategory && (
+                <div className="bg-white p-6 rounded-lg shadow">
+                  <div className="flex justify-between items-center mb-4">
+                    <h2 className="text-lg font-semibold">
+                      Subcategories for {selectedCategory}
+                    </h2>
+                    <button
+                      onClick={() => setSelectedCategory(null)}
+                      className="text-sm text-indigo-600 hover:text-indigo-800"
+                    >
+                      Back to All Categories
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Subcategory Chart */}
+                    <div className="h-80">
+                      {subCategoryData && subCategoryData.length > 0 ? (
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart data={subCategoryData}>
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis dataKey="name" />
+                            <YAxis />
+                            <Tooltip formatter={(value) => `${value.toLocaleString()} ₪`} />
+                            <Bar dataKey="value" fill="#8884d8">
+                              {subCategoryData.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                              ))}
+                            </Bar>
+                          </BarChart>
+                        </ResponsiveContainer>
+                      ) : (
+                        <div className="flex items-center justify-center h-full">
+                          <p className="text-gray-500">No subcategory data available</p>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Subcategory Table */}
+                    <div className="overflow-auto max-h-80">
+                      <table className="min-w-full">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th className="px-4 py-2 text-left text-sm font-medium text-gray-500">
+                              {getText('subcategory')}
+                            </th>
+                            <th className="px-4 py-2 text-right text-sm font-medium text-gray-500">
+                              {getText('amount')}
+                            </th>
+                            <th className="px-4 py-2 text-right text-sm font-medium text-gray-500">
+                              %
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200">
+                          {subCategoryData && subCategoryData
+                            .filter(subcat => subcat.name !== 'לא מסווג')
+                            .map((subcat) => {
+                              const categoryTotal = categoryData.find(cat => cat.category === selectedCategory)?.total || 0;
+                              const percentage = categoryTotal > 0 ? (subcat.value / categoryTotal * 100).toFixed(1) : 0;
+                              
+                              return (
+                                <tr key={subcat.name}>
+                                  <td className="px-4 py-2 text-sm text-gray-900">{subcat.name}</td>
+                                  <td className="px-4 py-2 text-sm text-right text-gray-900">
+                                    {subcat.value.toLocaleString(undefined, { maximumFractionDigits: 0 })} ₪
+                                  </td>
+                                  <td className="px-4 py-2 text-sm text-right text-gray-900">
+                                    {percentage}%
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </>
+      )}
+
+      {reportType === 'trend_analysis' && (
+        <div className="bg-white p-6 rounded-lg shadow">
+          <h2 className="text-lg font-semibold mb-4">Category Trend Analysis</h2>
+          <p className="text-gray-600 mb-4">This feature will be implemented in the next update.</p>
+          <p className="text-gray-600">It will allow you to compare spending in specific categories across multiple billing periods.</p>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default CategoryReport;
