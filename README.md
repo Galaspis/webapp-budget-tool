@@ -110,7 +110,3 @@ The application consists of two main parts:
 
 1. Update models in `models.py`
 2. The SQLAlchemy ORM will handle most migrations automatically
-
-## License
-
-This project is licensed under the MIT License
